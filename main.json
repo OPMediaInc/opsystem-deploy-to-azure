@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.33.93.31351",
-      "templateHash": "17291993347771109372"
+      "templateHash": "3487573542412260978"
     }
   },
   "parameters": {
@@ -13,9 +13,21 @@
       "type": "string",
       "defaultValue": "[resourceGroup().location]"
     },
+    "defaultName": {
+      "type": "string",
+      "defaultValue": "[format('op-{0}', subscription().displayName)]"
+    },
     "appPlanName": {
       "type": "string",
-      "defaultValue": "[format('{0}plan', uniqueString(resourceGroup().id))]"
+      "defaultValue": "[format('asp-{0}', parameters('defaultName'))]"
+    },
+    "webAppName": {
+      "type": "string",
+      "defaultValue": "[format('webapp-{0}', parameters('defaultName'))]"
+    },
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue": "[format('sa-{0}', parameters('defaultName'))]"
     },
     "skuName": {
       "type": "string",
@@ -40,17 +52,35 @@
       }
     },
     {
-      "type": "Microsoft.Storage/storageAccounts",
-      "apiVersion": "2021-02-01",
-      "name": "[format('{0}storage', parameters('appPlanName'))]",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2021-01-15",
+      "name": "[parameters('webAppName')]",
       "location": "[parameters('location')]",
-      "kind": "StorageV2",
-      "sku": {
-        "name": "Premium_LRS"
+      "tags": {
+        "[format('hidden-related:{0}/providers/Microsoft.Web/serverfarms/appServicePlan', resourceGroup().id)]": "Resource"
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appPlanName'))]",
+        "clientAffinityEnabled": true,
+        "httpsOnly": true,
+        "siteConfig": {
+          "webSocketsEnabled": true,
+          "linuxFxVersion": "DOCKER|opsystemcr.azurecr.io/opsystem:v1.0.3"
+        }
       },
       "dependsOn": [
         "[resourceId('Microsoft.Web/serverfarms', parameters('appPlanName'))]"
       ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2021-02-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "kind": "StorageV2",
+      "sku": {
+        "name": "Premium_LRS"
+      }
     }
   ]
 }

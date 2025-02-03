@@ -1,6 +1,9 @@
 param location string = resourceGroup().location
 
-param appPlanName string = '${uniqueString(resourceGroup().id)}plan'
+param defaultName string = 'op-${subscription().displayName}'
+param appPlanName string = 'asp-${defaultName}'
+param webAppName string = 'webapp-${defaultName}'
+param storageAccountName string = 'sa-${defaultName}'
 
 @allowed([
   'F1'
@@ -19,8 +22,25 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2020-12-01' = {
   }
 }
 
+resource webApplication 'Microsoft.Web/sites@2021-01-15' = {
+  name: webAppName
+  location: location
+  tags: {
+    'hidden-related:${resourceGroup().id}/providers/Microsoft.Web/serverfarms/appServicePlan': 'Resource'
+  }  
+  properties: {
+    serverFarmId: appServicePlan.id
+    clientAffinityEnabled: true
+    httpsOnly: true
+    siteConfig: {
+      webSocketsEnabled: true
+      linuxFxVersion: 'DOCKER|opsystemcr.azurecr.io/opsystem:v1.0.3'
+    }
+  }
+}
+
 resource storageaccount 'Microsoft.Storage/storageAccounts@2021-02-01' = {
-  name: '${appServicePlan.name}storage'
+  name: storageAccountName
   location: location
   kind: 'StorageV2'
   sku: {
