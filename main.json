@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.33.93.31351",
-      "templateHash": "520115208974186702"
+      "templateHash": "17291993347771109372"
     }
   },
   "parameters": {
@@ -16,6 +16,16 @@
     "appPlanName": {
       "type": "string",
       "defaultValue": "[format('{0}plan', uniqueString(resourceGroup().id))]"
+    },
+    "skuName": {
+      "type": "string",
+      "defaultValue": "F1",
+      "allowedValues": [
+        "F1",
+        "B1",
+        "S1",
+        "P1V2"
+      ]
     }
   },
   "resources": [
@@ -25,7 +35,7 @@
       "name": "[parameters('appPlanName')]",
       "location": "[parameters('location')]",
       "sku": {
-        "name": "F1",
+        "name": "[parameters('skuName')]",
         "capacity": 1
       }
     },

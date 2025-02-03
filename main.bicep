@@ -2,11 +2,19 @@ param location string = resourceGroup().location
 
 param appPlanName string = '${uniqueString(resourceGroup().id)}plan'
 
+@allowed([
+  'F1'
+  'B1'
+  'S1'
+  'P1V2'
+])
+param skuName string = 'F1'
+
 resource appServicePlan 'Microsoft.Web/serverfarms@2020-12-01' = {
   name: appPlanName
   location: location
   sku: {
-    name: 'F1'
+    name: skuName
     capacity: 1
   }
 }
