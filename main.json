@@ -5,29 +5,23 @@
     "_generator": {
       "name": "bicep",
       "version": "0.33.93.31351",
-      "templateHash": "3487573542412260978"
+      "templateHash": "2272583521993799758"
     }
   },
   "parameters": {
-    "location": {
-      "type": "string",
-      "defaultValue": "[resourceGroup().location]"
+    "buildPostgres": {
+      "type": "bool",
+      "defaultValue": true
     },
-    "defaultName": {
-      "type": "string",
-      "defaultValue": "[format('op-{0}', subscription().displayName)]"
+    "buildRedis": {
+      "type": "bool",
+      "defaultValue": true
     },
-    "appPlanName": {
-      "type": "string",
-      "defaultValue": "[format('asp-{0}', parameters('defaultName'))]"
+    "pgDbAdminPassword": {
+      "type": "securestring"
     },
-    "webAppName": {
-      "type": "string",
-      "defaultValue": "[format('webapp-{0}', parameters('defaultName'))]"
-    },
-    "storageAccountName": {
-      "type": "string",
-      "defaultValue": "[format('sa-{0}', parameters('defaultName'))]"
+    "jwtSecret": {
+      "type": "securestring"
     },
     "skuName": {
       "type": "string",
@@ -40,47 +34,276 @@
       ]
     }
   },
+  "variables": {
+    "opsystemTag": "v1.0.3",
+    "resourceGroupLocation": "[resourceGroup().location]",
+    "resourceSuffix": "[uniqueString(subscription().subscriptionId, resourceGroup().name)]",
+    "appPlanName": "[format('opsystemappserver-{0}', variables('resourceSuffix'))]",
+    "webAppName": "[format('opsystemwebapp-{0}', variables('resourceSuffix'))]",
+    "storageAccountName": "[substring(format('opsystemstorage{0}', variables('resourceSuffix')), 0, 24)]",
+    "pgDbName": "[format('opsystemdbserver-{0}', variables('resourceSuffix'))]",
+    "pgDbAdminUserName": "opsystemdbadmin",
+    "redisCacheName": "[format('opsystemcache-{0}', variables('resourceSuffix'))]"
+  },
   "resources": [
     {
       "type": "Microsoft.Web/serverfarms",
       "apiVersion": "2020-12-01",
-      "name": "[parameters('appPlanName')]",
-      "location": "[parameters('location')]",
+      "name": "[variables('appPlanName')]",
+      "location": "[variables('resourceGroupLocation')]",
+      "kind": "app,linux",
+      "properties": {
+        "reserved": true
+      },
       "sku": {
         "name": "[parameters('skuName')]",
         "capacity": 1
       }
     },
     {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2021-02-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[variables('resourceGroupLocation')]",
+      "kind": "StorageV2",
+      "sku": {
+        "name": "Standard_LRS"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/fileServices",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}', variables('storageAccountName'), 'default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/fileServices/shares",
+      "apiVersion": "2023-05-01",
+      "name": "[format('{0}/{1}/{2}', variables('storageAccountName'), 'default', 'opfiles')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/fileServices', variables('storageAccountName'), 'default')]"
+      ]
+    },
+    {
+      "condition": "[parameters('buildPostgres')]",
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "apiVersion": "2024-08-01",
+      "name": "[variables('pgDbName')]",
+      "location": "[variables('resourceGroupLocation')]",
+      "sku": {
+        "tier": "Burstable",
+        "name": "Standard_B2s"
+      },
+      "properties": {
+        "version": "16",
+        "storage": {
+          "iops": 120,
+          "tier": "P4",
+          "storageSizeGB": 32,
+          "autoGrow": "Disabled"
+        },
+        "administratorLogin": "[variables('pgDbAdminUserName')]",
+        "administratorLoginPassword": "[parameters('pgDbAdminPassword')]",
+        "network": {
+          "publicNetworkAccess": "Enabled"
+        }
+      }
+    },
+    {
+      "condition": "[parameters('buildPostgres')]",
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+      "apiVersion": "2024-11-01-preview",
+      "name": "[format('{0}/{1}', variables('pgDbName'), 'opsystem')]",
+      "properties": {
+        "charset": "UTF8",
+        "collation": "en_US.UTF8"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('pgDbName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('buildPostgres')]",
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers/firewallRules",
+      "apiVersion": "2024-08-01",
+      "name": "[format('{0}/{1}', variables('pgDbName'), 'AllowAllAzureServicesAndResourcesWithinAzureIps')]",
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "0.0.0.0"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('pgDbName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('buildRedis')]",
+      "type": "Microsoft.Cache/redis",
+      "apiVersion": "2024-04-01-preview",
+      "name": "[variables('redisCacheName')]",
+      "location": "[variables('resourceGroupLocation')]",
+      "properties": {
+        "redisVersion": "6",
+        "sku": {
+          "name": "Basic",
+          "family": "C",
+          "capacity": 0
+        },
+        "enableNonSslPort": false,
+        "minimumTlsVersion": "1.2",
+        "publicNetworkAccess": "Enabled",
+        "updateChannel": "Stable",
+        "disableAccessKeyAuthentication": false
+      }
+    },
+    {
       "type": "Microsoft.Web/sites",
       "apiVersion": "2021-01-15",
-      "name": "[parameters('webAppName')]",
-      "location": "[parameters('location')]",
+      "name": "[variables('webAppName')]",
+      "location": "[variables('resourceGroupLocation')]",
       "tags": {
         "[format('hidden-related:{0}/providers/Microsoft.Web/serverfarms/appServicePlan', resourceGroup().id)]": "Resource"
       },
       "properties": {
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appPlanName'))]",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appPlanName'))]",
         "clientAffinityEnabled": true,
         "httpsOnly": true,
         "siteConfig": {
           "webSocketsEnabled": true,
-          "linuxFxVersion": "DOCKER|opsystemcr.azurecr.io/opsystem:v1.0.3"
+          "linuxFxVersion": "[format('DOCKER|opsystemcr.azurecr.io/opsystem:{0}', variables('opsystemTag'))]",
+          "acrUseManagedIdentityCreds": false,
+          "azureStorageAccounts": {
+            "opfiles": {
+              "accountName": "[variables('storageAccountName')]",
+              "shareName": "opfiles",
+              "accessKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2021-02-01').keys[0].value]",
+              "mountPath": "/opfiles",
+              "type": "AzureFiles"
+            }
+          },
+          "appSettings": [
+            {
+              "name": "APP_HOST",
+              "value": "0.0.0.0"
+            },
+            {
+              "name": "APP_PORT",
+              "value": "3000"
+            },
+            {
+              "name": "DATABASE_URL",
+              "value": "[if(parameters('buildPostgres'), format('postgresql://{0}:{1}@{2}/{3}', variables('pgDbAdminUserName'), parameters('pgDbAdminPassword'), reference(resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('pgDbName')), '2024-08-01').fullyQualifiedDomainName, 'opsystem'), '')]"
+            },
+            {
+              "name": "REDIS_URL",
+              "value": "[if(parameters('buildRedis'), format('rediss://:{0}@{1}:6380', listKeys(resourceId('Microsoft.Cache/redis', variables('redisCacheName')), '2024-04-01-preview').primaryKey, reference(resourceId('Microsoft.Cache/redis', variables('redisCacheName')), '2024-04-01-preview').hostName), '')]"
+            },
+            {
+              "name": "JWT_SECRET",
+              "value": "[parameters('jwtSecret')]"
+            },
+            {
+              "name": "ADB2C_AUTHORITY_DOMAIN",
+              "value": ""
+            },
+            {
+              "name": "ADB2C_TENANT_ID",
+              "value": ""
+            },
+            {
+              "name": "ADB2C_TENANT_NAME",
+              "value": ""
+            },
+            {
+              "name": "ADB2C_POLICY_NAME",
+              "value": ""
+            },
+            {
+              "name": "ADB2C_CLIENT_ID",
+              "value": ""
+            },
+            {
+              "name": "ADB2C_CLIENT_SECRET",
+              "value": ""
+            },
+            {
+              "name": "ADB2C_REDIRECT_URI",
+              "value": ""
+            },
+            {
+              "name": "ADB2C_SCOPES",
+              "value": "openid profile"
+            },
+            {
+              "name": "FILE_IO_ROOT",
+              "value": "/opfiles"
+            },
+            {
+              "name": "DEFAULT_IDP",
+              "value": "adb2c"
+            },
+            {
+              "name": "SENDGRID_API_KEY",
+              "value": ""
+            },
+            {
+              "name": "SENDGRID_FROM_EMAIL",
+              "value": ""
+            },
+            {
+              "name": "BASE_APPLICATION_URL",
+              "value": ""
+            },
+            {
+              "name": "OP_IMPORT_CLI_PATH",
+              "value": "/usr/local/bin/opimport-cli/opimport-cli.py"
+            },
+            {
+              "name": "LICENSE_KEY",
+              "value": ""
+            },
+            {
+              "name": "CRM_TENANT_ID",
+              "value": ""
+            },
+            {
+              "name": "CRM_CLIENT_ID",
+              "value": ""
+            },
+            {
+              "name": "CRM_CLIENT_SECRET",
+              "value": ""
+            },
+            {
+              "name": "CRM_CLIENT_SCOPE",
+              "value": ""
+            },
+            {
+              "name": "CRM_BASE_API_URL",
+              "value": ""
+            },
+            {
+              "name": "FIRST_ADMIN_EMAIL",
+              "value": ""
+            }
+          ]
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Web/serverfarms', parameters('appPlanName'))]"
+        "[resourceId('Microsoft.Web/serverfarms', variables('appPlanName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/fileServices/shares', variables('storageAccountName'), 'default', 'opfiles')]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/databases', variables('pgDbName'), 'opsystem')]",
+        "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', variables('pgDbName'))]",
+        "[resourceId('Microsoft.Cache/redis', variables('redisCacheName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
       ]
-    },
-    {
-      "type": "Microsoft.Storage/storageAccounts",
-      "apiVersion": "2021-02-01",
-      "name": "[parameters('storageAccountName')]",
-      "location": "[parameters('location')]",
-      "kind": "StorageV2",
-      "sku": {
-        "name": "Premium_LRS"
-      }
     }
-  ]
+  ],
+  "outputs": {
+    "defaultHostName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', variables('webAppName')), '2021-01-15').defaultHostName]"
+    }
+  }
 }
